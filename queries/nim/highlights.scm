@@ -1,4 +1,4 @@
-; SPDX-FileCopyrightText: 2023 Leorize <leorize+oss@disroot.org>
+; SPDX-FileCopyrightText: 2023 Leorize <leorize+oss@disroot.org>, aMOPel <>
 ; SPDX-License-Identifier: MPL-2.0
 
 ; =============================================================================
@@ -52,13 +52,6 @@
 ; unused
 
 ; =============================================================================
-; @operator              ; symbolic operators (e.g. `+` / `*`)
-
-(_ operator: _ @operator)
-
-[ "=" ] @operator
-
-; =============================================================================
 ; @punctuation.delimiter ; delimiters (e.g. `;` / `.` / `,`)
 
 [ "." ";" "," ":" ] @punctuation.delimiter
@@ -77,14 +70,13 @@
 
 (exported_symbol "*" @punctuation.special)
 
-; TODO: string interpolation
+; dereference operator
+(bracket_expression !right "[" @punctuation.special . "]" @punctuation.special)
 
 ; =============================================================================
 ; @string               ; string literals
 
 (string_literal) @string
-
-; TODO: make single quotes/triple quotes alternatives to condense code
 
 ; =============================================================================
 ; @string.documentation ; string documenting code (e.g. Python docstrings)
@@ -165,22 +157,19 @@
 ; `identifier"string literal"`
 ; is short for
 ; `identifier(r"string literal")`
-(generalized_string . (identifier) @function.call)
+(generalized_string . [
+  (identifier) @function.call
+  (accent_quoted (identifier) @function.call)
+])
 
 ; =============================================================================
 ; @function.builtin ; built-in functions
 
-; ; echo
 ; (call
 ;   function:
 ;     (identifier) @function.builtin
-;   (#match? @function.builtin "^e[cC][hH][oO]$"))
-
-; ; new
-; (call
-;   function:
-;     (identifier) @function.builtin
-;   (#match? @function.builtin "^n[eE][wW]$"))
+;   (#any-of? @function.builtin "new" "echo" "default"))
+; NOTE: is it worth it to even start?
 
 ; =============================================================================
 ; @function.macro   ; preprocessor macros
@@ -202,7 +191,12 @@
 ; @constructor      ; constructor calls and definitions
 
 (call
-  function: (identifier) @constructor
+  function: [
+    (identifier) @constructor
+    (accent_quoted (identifier) @constructor)
+    (bracket_expression left: (identifier) @constructor)
+    (bracket_expression left: (dot_expression right: (identifier) @constructor))
+  ]
   (argument_list
     (colon_expression)+))
 ; NOTE: this cannot detect constructors with 0 arguments
@@ -214,7 +208,7 @@
 ; named parameters when calling
 ; call(parameter_name=arg)
 (argument_list
-  (equal_expression left: (identifier) @parameter))
+  (equal_expression left: (_) @parameter))
 
 ; parameters in function declaration
 (parameter_declaration_list
@@ -374,18 +368,15 @@
 ; generic types when calling
 (call
   function: (bracket_expression
-    right: (argument_list [
-      (identifier) @type
-      (accent_quoted (identifier) @type)
-    ]))
-)
-; NOTE: this also falsy matches when accessing and call elements
-; from an array of routines
+    right: (argument_list (_) @type)))
+; NOTE: this also falsy matches 
+; when accessing and directly call elements from an array of routines
+; eg `array_of_routines[index](arguments)
 
 (type_symbol_declaration name: (_) @type)
 
 ; right side of `is` operator is always type
-(infix_expression operator: "is" right: (_) @type)
+(infix_expression operator: [ "is" "isnot" ] right: (_) @type)
 
 ; `except module.exception[gen_type] as variable:`
 (except_branch values: (expression_list
@@ -397,17 +388,18 @@
   ]))
 ; TODO: is there another way?
 
-; =============================================================================
-; @type.builtin    ; built-in types
-
 ; for inline tuple types
 ; `type a = tuple[a: int]`
 (tuple_type
-  "tuple" @type.builtin
+  "tuple" @type
   (field_declaration_list))
 ; NOTE: this is consistent with othere builtin types like `seq[int]`
 ; but inconsistent with multiline tuple declaration,
 ; where `tuple` is captured as @keyword
+
+; =============================================================================
+; @type.builtin    ; built-in types
+
 
 ; ; overrule identifiers in type_expression if they match builtin type string
 ; (
@@ -504,55 +496,30 @@
 ; =============================================================================
 ; @field           ; object and struct fields
 
-; fields in object declaration
-(object_declaration
-  (field_declaration_list
-    [
-    (field_declaration
-      (symbol_declaration_list
-        (symbol_declaration
-          name: (_) @field)))
-    (variant_declaration
-      (of_branch
-        (field_declaration_list
-          (field_declaration
-            (symbol_declaration_list
-              (symbol_declaration
-                name: (_) @field))))))
-    (conditional_declaration
-      consequence: (field_declaration_list
-          (field_declaration
-            (symbol_declaration_list
-              (symbol_declaration
-                name: (_) @field)))))
-    ]))
+; fields in object/tuple declaration
+(field_declaration
+  (symbol_declaration_list
+    (symbol_declaration name: (_) @field)))
 
 ; fields in object construction
 (call
   (argument_list
     (colon_expression left: (_) @field)))
 
-; =============================================================================
-; @property        ; similar to `@field`
-
-; fields in tuple declaration
-(tuple_type [
-  ; `type a = tuple[a: int]`
-  (field_declaration
-    (symbol_declaration_list
-      (symbol_declaration
-        name: (_) @property)))
-  ; `type a = tuple
-  ;   a: int`
-  (field_declaration_list
-    (field_declaration
-      (symbol_declaration_list
-        (symbol_declaration
-          name: (_) @property))))
- ])
-
+; fields in tuple construction
 (tuple_construction
-  (colon_expression left: (_) @property))
+  (colon_expression left: (_) @field))
+
+; ; fields in assignments
+; (assignment left: [
+;   (dot_expression right: (_) @field)
+;   (_ (dot_expression right: (_) @field))
+;   (_ (_ (dot_expression right: (_) @field)))
+;   (_ (_ (_ (dot_expression right: (_) @field))))
+;   (_ (_ (_ (_ (dot_expression right: (_) @field)))))
+;   ])
+; NOTE: inaccurate, since it can be dot_expression, bracket_expression and calls
+; in various combinations. Calls should not be matched as fields.
 
 ; (dot_expression
 ;   right: (identifier) @property)
@@ -561,6 +528,10 @@
 ; `external_module.identifier_from_module`
 ; `enum_type.enum_element`
 ; and probably more
+
+; =============================================================================
+; @property        ; similar to `@field`
+; unused
 
 ; =============================================================================
 ; @variable         ; various variable names
@@ -615,11 +586,30 @@
 (enum_field_declaration
   (symbol_declaration name: (_) @constant))
 
+; constants/enums in array construction
+(array_construction
+  (colon_expression left: [
+      (identifier) @constant
+      (_ (identifier) @constant)
+      (_ (_ (identifier) @constant))
+    ]))
+
 ; constant declaration
 (const_section
   (variable_declaration
     (symbol_declaration_list
       (symbol_declaration name: (_) @constant))))
+
+; ranges in generic types and in calls with generic types
+; array[enum1..enum5, int]
+; range[nkAdd..nkSub](unknownKind)
+(bracket_expression 
+  right: (argument_list 
+    (infix_expression 
+      left: (_) @constant
+      operator: (operator) @operator 
+      (#eq? @operator "..")
+      right: (_) @constant)))
 
 ; =============================================================================
 ; @constant.builtin ; built-in constant values
@@ -657,6 +647,25 @@
 ; =============================================================================
 ; @symbol           ; symbols or atoms
 ; unused
+
+; =============================================================================
+; @operator              ; symbolic operators (e.g. `+` / `*`)
+
+; NOTE: it's down here, to overrule @type in calls with generics
+(operator) @operator
+
+[ "=" ] @operator
+
+; =============================================================================
+; overrule things
+
+; left identifier in dot_expression
+(dot_expression left: [
+    (identifier) @none
+    (accent_quoted (identifier) @none)
+  ])
+; NOTE: it can't be know what the left identifier is, so better leave it alone
+; for consistency
 
 ; =============================================================================
 ; highlight exceptions for injection queries
