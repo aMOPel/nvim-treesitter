@@ -1,21 +1,61 @@
 ; SPDX-FileCopyrightText: 2023 Leorize <leorize+oss@disroot.org>, aMOPel <>
 ; SPDX-License-Identifier: MPL-2.0
 
+; Reasoning:
+
+; # No `#set! "priority"`
+;
+; I avoided using `#set! "priority"`, since it's nvim specific and
+; the ts cli doesn't support it.
+; This way, these queries could be tested with the cli.
+;
+; This decision entailed that I had to explicitly capture (identifier)s
+; and could not used (_) @capture,
+; since the catch all rule for @variable is most specific and will overrule
+; anything not directly applied to (identifier)s.
+;
+; Another problem is the structure of the grammar.
+; There are various grammar rules that allow for (infinitely) deep nesting
+; of identifiers in important places, like @type captures.
+; Among others (bracket_expression) and (dot_expression).
+; Because of this, there are some places where I had to use a structure like
+;
+; (type_expression [
+;   (identifier) @type
+;   (_ (identifier) @type)
+;   (_ (_ (identifier) @type))
+;   (_ (_ (_ (identifier) @type)))
+;   ...
+;
+; to catch those deeply nested identifiers.
+; This means, highlighting will break down for identifiers that nest deeper
+; than what I have provide queries for.
+;
+; I would have had to use this structure too, if I would have used 
+; `#set! priority`. Then I would have used `(type_expression) @type`
+; but would have to overrule identifiers in pragmas of proc types, 
+; since those are (identifier)s and would otherwise be captured as @type
+
+; # builtins 
+; The captured builtin constants, types and functions are incomplete.
+; There is a vast amount and the question is where to draw the line.
+; 
+; Also I decided against the more accurrate method of capturing builtin 
+; identifiers with case insensitive regex matching.
+; I don't believe the performance cost of the many regexes is worth the gain.
+
+; # injections 
+; To make injections look better, there are queries in the very bottom,
+; which capture the content of (comment)s and (string_literal)s as @none.
+; If this is not done, every token, the injected language doesn't capture
+; will be highlighted as @comment or @string.
+; There is still the caveat, that highlighting in the injected region
+; will be inconsistent under specific circumstances.
+
 ; =============================================================================
 ; catch all rules
 
-((identifier) @variable
-  (#set! "priority" 99))
-((accent_quoted (identifier) @variable)
-  (#set! "priority" 99))
-; NOTE: needs lower priority since it's more specific than `(type_expression) @type`
-
-; catch all rule
-; captures everything inside a type_expression,
-; false positives need to be overruled
-; this is necessary, since type_expression can nest identifiers very deep
-; for example with bracket_expression as generic types
-(type_expression) @type
+(identifier) @variable
 
 ; =============================================================================
 ; @comment               ; line and block comments
@@ -52,9 +92,17 @@
 ; unused
 
 ; =============================================================================
+; @operator              ; symbolic operators (e.g. `+` / `*`)
+
+(operator) @operator
+
+; =============================================================================
 ; @punctuation.delimiter ; delimiters (e.g. `;` / `.` / `,`)
 
-[ "." ";" "," ":" ] @punctuation.delimiter
+[ "." ";" "," ":" "=" ] @punctuation.delimiter
+
+; needs to be after @punctuation.delimiter
+(assignment "=" @operator)
 
 ; (_ "=" @punctuation.delimiter [body: (_) value: (_)])
 
@@ -125,13 +173,37 @@
 ; =============================================================================
 ; @function         ; function definitions
 
-(proc_declaration name: (_) @function)
+(proc_declaration 
+  name: [
+    (identifier) @function
+    (accent_quoted (identifier) @function)
+    (exported_symbol (identifier) @function)
+    (exported_symbol (accent_quoted (identifier) @function))
+  ])
 
-(func_declaration name: (_) @function)
+(func_declaration
+  name: [
+    (identifier) @function
+    (accent_quoted (identifier) @function)
+    (exported_symbol (identifier) @function)
+    (exported_symbol (accent_quoted (identifier) @function))
+  ])
 
-(iterator_declaration name: (_) @function)
+(iterator_declaration
+  name: [
+    (identifier) @function
+    (accent_quoted (identifier) @function)
+    (exported_symbol (identifier) @function)
+    (exported_symbol (accent_quoted (identifier) @function))
+  ])
 
-(converter_declaration name: (_) @function)
+(converter_declaration
+  name: [
+    (identifier) @function
+    (accent_quoted (identifier) @function)
+    (exported_symbol (identifier) @function)
+    (exported_symbol (accent_quoted (identifier) @function))
+  ])
 
 ; =============================================================================
 ; @function.call    ; function calls
@@ -142,10 +214,10 @@
     (accent_quoted (identifier) @function.call)
     ; generic types
     (bracket_expression left: (identifier) @function.call)
-    (bracket_expression left: (accent_quoted (identifier) @function.call) )
+    (bracket_expression left: (accent_quoted (identifier) @function.call))
     ; dot accessor
     (dot_expression right: (identifier) @function.call)
-    (dot_expression right: (accent_quoted (identifier) @function.call) )
+    (dot_expression right: (accent_quoted (identifier) @function.call))
     ; both
     (bracket_expression left: 
       (dot_expression right: (identifier) @function.call))
@@ -165,23 +237,41 @@
 ; =============================================================================
 ; @function.builtin ; built-in functions
 
-; (call
-;   function:
-;     (identifier) @function.builtin
-;   (#any-of? @function.builtin "new" "echo" "default"))
-; NOTE: is it worth it to even start?
+(call
+  function:
+    (identifier) @function.builtin
+  (#any-of? @function.builtin "new" "echo" "default"))
+; NOTE: there are too many builtin functions. where to draw the line?
 
 ; =============================================================================
 ; @function.macro   ; preprocessor macros
 
-(template_declaration name: (_) @function.macro)
+(template_declaration
+  name: [
+    (identifier) @function
+    (accent_quoted (identifier) @function)
+    (exported_symbol (identifier) @function)
+    (exported_symbol (accent_quoted (identifier) @function))
+  ])
 
-(macro_declaration name: (_) @function.macro)
+(macro_declaration
+  name: [
+    (identifier) @function
+    (accent_quoted (identifier) @function)
+    (exported_symbol (identifier) @function)
+    (exported_symbol (accent_quoted (identifier) @function))
+  ])
 
 ; =============================================================================
 ; @method           ; method definitions
 
-(method_declaration name: (_) @method)
+(method_declaration
+  name: [
+    (identifier) @method
+    (accent_quoted (identifier) @method)
+    (exported_symbol (identifier) @method)
+    (exported_symbol (accent_quoted (identifier) @method))
+  ])
 
 ; =============================================================================
 ; @method.call      ; method calls
@@ -194,8 +284,17 @@
   function: [
     (identifier) @constructor
     (accent_quoted (identifier) @constructor)
+    ; generic types
     (bracket_expression left: (identifier) @constructor)
-    (bracket_expression left: (dot_expression right: (identifier) @constructor))
+    (bracket_expression left: (accent_quoted (identifier) @constructor))
+    ; dot accessor
+    (dot_expression right: (identifier) @constructor)
+    (dot_expression right: (accent_quoted (identifier) @constructor))
+    ; both
+    (bracket_expression left: 
+      (dot_expression right: (identifier) @constructor))
+    (bracket_expression left: 
+      (dot_expression right: (accent_quoted (identifier) @constructor)))
   ]
   (argument_list
     (colon_expression)+))
@@ -208,13 +307,21 @@
 ; named parameters when calling
 ; call(parameter_name=arg)
 (argument_list
-  (equal_expression left: (_) @parameter))
+  (equal_expression 
+    left: [
+      (identifier) @parameter
+      (accent_quoted (identifier) @parameter)
+    ]))
 
 ; parameters in function declaration
 (parameter_declaration_list
   (parameter_declaration
     (symbol_declaration_list
-      (symbol_declaration name: (_) @parameter))))
+      (symbol_declaration
+        name: [
+          (identifier) @parameter
+          (accent_quoted (identifier) @parameter)
+        ]))))
 
 ; =============================================================================
 ; @keyword             ; various keywords
@@ -223,11 +330,11 @@
 ; end
 ; interface
 
+; static expression
+; addr operator
 ((call
   function: (identifier) @keyword)
   (#any-of? @keyword "static" "addr"))
-; static expression
-; addr operator
 
 [
   "const"
@@ -331,7 +438,11 @@
 ; =============================================================================
 ; @label               ; GOTO and other labels (e.g. `label:` in C)
 
-(block label: (_) @label)
+(block
+  label: [
+    (identifier) @label
+    (accent_quoted (identifier) @label)
+  ])
 
 ; =============================================================================
 ; @include             ; keywords for including modules (e.g. `import` / `from` in Python)
@@ -359,113 +470,183 @@
 ; =============================================================================
 ; @type            ; type or class definitions and annotations
 
+(type_expression [
+  (identifier) @type
+  (_ (identifier) @type)
+  (_ (_ (identifier) @type))
+  (_ (_ (_ (identifier) @type)))
+  (_ (_ (_ (_ (identifier) @type))))
+  (_ (_ (_ (_ (_ (identifier) @type)))))
+  (_ (_ (_ (_ (_ (_ (identifier) @type))))))
+  (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))
+  (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))
+  (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))
+  (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))
+  (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))))
+  (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))))
+])
+
 ; generic types when declaring
 ((generic_parameter_list
   (parameter_declaration
     (symbol_declaration_list
-      (symbol_declaration name: (_) @type)))))
+      (symbol_declaration 
+        name: [
+          (identifier) @type
+          (accent_quoted (identifier) @type)
+        ])))))
 
 ; generic types when calling
 (call
   function: (bracket_expression
-    right: (argument_list (_) @type)))
-; NOTE: this also falsy matches 
+    right: (argument_list [
+      (identifier) @type
+      (_ (identifier) @type)
+      (_ (_ (identifier) @type))
+      (_ (_ (_ (identifier) @type)))
+      (_ (_ (_ (_ (identifier) @type))))
+      (_ (_ (_ (_ (_ (identifier) @type)))))
+      (_ (_ (_ (_ (_ (_ (identifier) @type))))))
+      (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))
+      (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))
+      (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))
+      (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))
+      (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))))
+      (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))))
+    ])))
+; NOTE: this also falsely matches 
 ; when accessing and directly call elements from an array of routines
 ; eg `array_of_routines[index](arguments)
 
-(type_symbol_declaration name: (_) @type)
+; left side of type declaration
+(type_symbol_declaration 
+  name: [
+    (identifier) @type
+    (accent_quoted (identifier) @type)
+    (exported_symbol (identifier) @type)
+    (exported_symbol (accent_quoted (identifier) @type))
+  ])
 
 ; right side of `is` operator is always type
-(infix_expression operator: [ "is" "isnot" ] right: (_) @type)
-
-; `except module.exception[gen_type] as variable:`
-(except_branch values: (expression_list
-  [
+(infix_expression 
+  operator: [ "is" "isnot" ] 
+  right: [
     (identifier) @type
+    (_ (identifier) @type)
+    (_ (_ (identifier) @type))
+    (_ (_ (_ (identifier) @type)))
+    (_ (_ (_ (_ (identifier) @type))))
+    (_ (_ (_ (_ (_ (identifier) @type)))))
+    (_ (_ (_ (_ (_ (_ (identifier) @type))))))
+    (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))
+    (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))
+    (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))
+    (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))
+    (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))))
+    (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))))
+  ])
+
+; except branch always contains types of errors
+; Eg: `except module.exception[gen_type] as variable:`
+(except_branch 
+  values: (expression_list [
+    (identifier) @type
+    (accent_quoted (identifier) @type)
     (infix_expression
-      left: (_) @type
+      left: [
+        (identifier) @type
+        (_ (identifier) @type)
+        (_ (_ (identifier) @type))
+        (_ (_ (_ (identifier) @type)))
+        (_ (_ (_ (_ (identifier) @type))))
+        (_ (_ (_ (_ (_ (identifier) @type)))))
+        (_ (_ (_ (_ (_ (_ (identifier) @type))))))
+        (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))
+        (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))
+        (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))
+        (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))
+        (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type)))))))))))
+        (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type))))))))))))
+      ]
       operator: "as")
   ]))
-; TODO: is there another way?
 
 ; for inline tuple types
 ; `type a = tuple[a: int]`
 (tuple_type
   "tuple" @type
   (field_declaration_list))
-; NOTE: this is consistent with othere builtin types like `seq[int]`
+; NOTE: this is consistent with other generic types like `seq[int]`
 ; but inconsistent with multiline tuple declaration,
 ; where `tuple` is captured as @keyword
 
 ; =============================================================================
 ; @type.builtin    ; built-in types
 
-
-; ; overrule identifiers in type_expression if they match builtin type string
-; (
-;  [
-;    (type_expression (identifier) @type.builtin)
-;    (type_expression (_ (identifier) @type.builtin))
-;    (type_expression (_ (_ (identifier) @type.builtin)))
-;    (type_expression (_ (_ (_ (identifier) @type.builtin))))
-;    (type_expression (_ (_ (_ (_ (identifier) @type.builtin)))))
-;    (type_expression (_ (_ (_ (_ (_ (identifier) @type.builtin))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))))))))
-;    (type_expression (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))))))))
-;  ]
-;  (#any-of? @type.builtin
-;   "byte"
-;   "int"
-;   "int8"
-;   "int16"
-;   "int32"
-;   "int64"
-;   "uint"
-;   "uint8"
-;   "uint16"
-;   "uint32"
-;   "uint64"
-;   "float"
-;   "float32"
-;   "float64"
-;   "bool"
-;   "char"
-;   "string"
-;   "cstring"
-;   "ref"
-;   "ptr"
-;   "range"
-;   "array"
-;   "seq"
-;   "openArray"
-;   "varargs"
-;   "set"
-;   "itarable"
-;   "typedesc"
-;   "untyped"
-;   "auto"
-;   "pointer"
-;   "void"
-;   "Rune"
-;   "UncheckedArray"
-;   "RootObj"
-;   "SomeFloat"
-;   "SomeInteger"
-;   "SomeOrdinal"
-;   "SomeNumber"
-;   "SomeSignedInt"
-;   "SomeUnsignedInt"
-;   "Natural"
-;   "Ordinal"
-;   "Positive"
-;  ))
-; ; TODO: is there another way?
+; overrule identifiers in type_expression if they match builtin type string
+(type_expression
+ [
+   (identifier) @type.builtin
+   (_ (identifier) @type.builtin)
+   (_ (_ (identifier) @type.builtin))
+   (_ (_ (_ (identifier) @type.builtin)))
+   (_ (_ (_ (_ (identifier) @type.builtin))))
+   (_ (_ (_ (_ (_ (identifier) @type.builtin)))))
+   (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))
+   (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))
+   (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))
+   (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))))
+   (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))))
+   (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin)))))))))))
+   (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @type.builtin))))))))))))
+ ]
+ (#any-of? @type.builtin
+  "bool"
+  "byte"
+  "int"
+  "int8"
+  "int16"
+  "int32"
+  "int64"
+  "uint"
+  "uint8"
+  "uint16"
+  "uint32"
+  "uint64"
+  "float"
+  "float32"
+  "float64"
+  "char"
+  "string"
+  "cstring"
+  "range"
+  "array"
+  "seq"
+  "set"
+  "openArray"
+  "varargs"
+  "itarable"
+  "typedesc"
+  "typed"
+  "untyped"
+  "auto"
+  "pointer"
+  "void"
+  ; "Rune"
+  ; "UncheckedArray"
+  ; "RootObj"
+  ; "SomeFloat"
+  ; "SomeInteger"
+  ; "SomeOrdinal"
+  ; "SomeNumber"
+  ; "SomeSignedInt"
+  ; "SomeUnsignedInt"
+  ; "Natural"
+  ; "Ordinal"
+  ; "Positive"
+  ; ...
+ ))
+; NOTE: is this worth it?
 
 ; =============================================================================
 ; @type.definition ; type definitions (e.g. `typedef` in C)
@@ -499,16 +680,30 @@
 ; fields in object/tuple declaration
 (field_declaration
   (symbol_declaration_list
-    (symbol_declaration name: (_) @field)))
+    (symbol_declaration
+      name: [
+        (identifier) @field
+        (accent_quoted (identifier) @field)
+        (exported_symbol (identifier) @field)
+        (exported_symbol (accent_quoted (identifier) @field))
+      ])))
 
 ; fields in object construction
 (call
   (argument_list
-    (colon_expression left: (_) @field)))
+    (colon_expression
+      left: [
+        (identifier) @field
+        (accent_quoted (identifier) @field)
+      ])))
 
 ; fields in tuple construction
 (tuple_construction
-  (colon_expression left: (_) @field))
+  (colon_expression
+    left: [
+      (identifier) @field
+      (accent_quoted (identifier) @field)
+    ]))
 
 ; ; fields in assignments
 ; (assignment left: [
@@ -536,21 +731,6 @@
 ; =============================================================================
 ; @variable         ; various variable names
 
-; overrule identifiers in proc type pragmas
-; `type a = proc() {.x.a: [y].}`
-(proc_type (pragma_list [
-  (identifier) @variable
-  (_ (identifier) @variable)
-  (_ (_ (identifier) @variable))
-  (_ (_ (_ (identifier) @variable)))
-  (_ (_ (_ (_ (identifier) @variable))))
-  (_ (_ (_ (_ (_ (identifier) @variable)))))
-  (_ (_ (_ (_ (_ (_ (identifier) @variable))))))
-  (_ (_ (_ (_ (_ (_ (_ (identifier) @variable)))))))
-  (_ (_ (_ (_ (_ (_ (_ (_ (identifier) @variable))))))))
-]))
-; TODO: is there another way?
-
 ; =============================================================================
 ; @variable.builtin ; built-in variable names (e.g. `this`)
 
@@ -565,40 +745,61 @@
 ; identifiers in "case" "of" branches have to be enums
 (case
   (of_branch values:
-    (expression_list
-      [
-        (identifier) @constant
-        (_ (identifier) @constant)
-        (_ (_ (identifier) @constant))
-      ])))
+    (expression_list [
+      (identifier) @constant
+      (_ (identifier) @constant)
+      (_ (_ (identifier) @constant))
+      (_ (_ (_ (identifier) @constant)))
+      (_ (_ (_ (_ (identifier) @constant))))
+      (_ (_ (_ (_ (_ (identifier) @constant)))))
+      (_ (_ (_ (_ (_ (_ (identifier) @constant))))))
+    ])))
 
 ; in variant objects with "case" "of"
 (variant_declaration
   (of_branch values:
-    (expression_list
-      [
-        (identifier) @constant
-        (_ (identifier) @constant)
-        (_ (_ (identifier) @constant))
-      ])))
-
-; enum elements are constants
-(enum_field_declaration
-  (symbol_declaration name: (_) @constant))
-
-; constants/enums in array construction
-(array_construction
-  (colon_expression left: [
+    (expression_list [
       (identifier) @constant
       (_ (identifier) @constant)
       (_ (_ (identifier) @constant))
+      (_ (_ (_ (identifier) @constant)))
+      (_ (_ (_ (_ (identifier) @constant))))
+      (_ (_ (_ (_ (_ (identifier) @constant)))))
+      (_ (_ (_ (_ (_ (_ (identifier) @constant))))))
+    ])))
+
+; enum elements are constants
+(enum_field_declaration
+  (symbol_declaration
+    name: [
+      (identifier) @constant
+      (accent_quoted (identifier) @constant)
+    ]))
+
+; constants/enums in array construction
+(array_construction
+  (colon_expression 
+    left: [
+      (identifier) @constant
+      (_ (identifier) @constant)
+      (_ (_ (identifier) @constant))
+      (_ (_ (_ (identifier) @constant)))
+      (_ (_ (_ (_ (identifier) @constant))))
+      (_ (_ (_ (_ (_ (identifier) @constant)))))
+      (_ (_ (_ (_ (_ (_ (identifier) @constant))))))
     ]))
 
 ; constant declaration
 (const_section
   (variable_declaration
     (symbol_declaration_list
-      (symbol_declaration name: (_) @constant))))
+      (symbol_declaration
+        name: [
+          (identifier) @constant
+          (accent_quoted (identifier) @constant)
+          (exported_symbol (identifier) @constant)
+          (exported_symbol (accent_quoted (identifier) @constant))
+        ]))))
 
 ; ranges in generic types and in calls with generic types
 ; array[enum1..enum5, int]
@@ -606,33 +807,34 @@
 (bracket_expression 
   right: (argument_list 
     (infix_expression 
-      left: (_) @constant
+      left: [
+        (identifier) @constant
+        (_ (identifier) @constant)
+        (_ (_ (identifier) @constant))
+        (_ (_ (_ (identifier) @constant)))
+        (_ (_ (_ (_ (identifier) @constant))))
+        (_ (_ (_ (_ (_ (identifier) @constant)))))
+        (_ (_ (_ (_ (_ (_ (identifier) @constant))))))
+      ]
       operator: (operator) @operator 
       (#eq? @operator "..")
-      right: (_) @constant)))
+      right: [
+        (identifier) @constant
+        (_ (identifier) @constant)
+        (_ (_ (identifier) @constant))
+        (_ (_ (_ (identifier) @constant)))
+        (_ (_ (_ (_ (identifier) @constant))))
+        (_ (_ (_ (_ (_ (identifier) @constant)))))
+        (_ (_ (_ (_ (_ (_ (identifier) @constant))))))
+      ])))
+
 
 ; =============================================================================
 ; @constant.builtin ; built-in constant values
 
-; ; NaN
-; ((identifier) @constant.builtin
-;   (#match? @constant.builtin "^N[aA][nN]$"))
-; ; Inf
-; ((identifier) @constant.builtin
-;   (#match? @constant.builtin "^I[nN][fF]$"))
-; ; NegInf
-; ((identifier) @constant.builtin
-;   (#match? @constant.builtin "^N[eE][gG][iI][nN][fF]$"))
-;
-; ; stdin
-; ((identifier) @constant.builtin
-;   (#match? @constant.builtin "^s[tT][dD][iI][nN]$"))
-; ; stdout
-; ((identifier) @constant.builtin
-;   (#match? @constant.builtin "^s[tT][dD][oO][uU][tT]$"))
-; ; stderr
-; ((identifier) @constant.builtin
-;   (#match? @constant.builtin "^s[tT][dD][eE][rR][rR]$"))
+; ; NaN, Inf, NegInf, stdin, stdout, stderr
+((identifier) @constant.builtin
+  (#any-of? @constant.builtin "NaN" "Inf" "NegInf" "stdin" "stdout" "stderr"))
 
 (nil_literal) @constant.builtin
 
@@ -649,21 +851,13 @@
 ; unused
 
 ; =============================================================================
-; @operator              ; symbolic operators (e.g. `+` / `*`)
-
-; NOTE: it's down here, to overrule @type in calls with generics
-(operator) @operator
-
-[ "=" ] @operator
-
-; =============================================================================
 ; overrule things
 
 ; left identifier in dot_expression
 (dot_expression left: [
-    (identifier) @none
-    (accent_quoted (identifier) @none)
-  ])
+  (identifier) @none
+  (accent_quoted (identifier) @none)
+])
 ; NOTE: it can't be know what the left identifier is, so better leave it alone
 ; for consistency
 
@@ -715,4 +909,3 @@
 
 ((block_documentation_comment) @none
  (#offset! @none 0 3 0 -3)) ; wrapping `##[` `]##`
-
