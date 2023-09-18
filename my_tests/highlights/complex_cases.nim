@@ -4,7 +4,7 @@
 
 # enum
 type 
-  Enum1* {.pure.} = enum one, two, three
+  `Enum1`* {.pure.} = enum one, two, three
   Enum2* = enum 
     one="hi", two=4, three=(5,"test")
 
@@ -19,6 +19,8 @@ discard arr1[0]
 const test = 3
 let arr2* = [1:"hi", 2:"bye", test:"shy"]
 let arr3* = [1..5, 6..8]
+
+discard arr3[test..6]
 
 # varargs
 # BUG: `$` falsly highlighted as @type, but impossible to distinguish
@@ -65,6 +67,8 @@ let
   A* = GenObj[int](a:5)
   B* = module_tests.ExternalGenObj[int](a:5)
 
+assert B is module_tests.ExternalGenObj[seq[seq[int]]]
+
 type
   NodeKind = enum  # the different node types
     nkInt,          # a leaf with an integer value
@@ -102,12 +106,14 @@ proc getIdentity(x: var Node): var Node =
   result = x
 
 x.getIdentity().kind = nkInt
-  
 
 # generics
 let
-  C* = GenObj[seq[array[Enum1.one..Enum1.two, seq[array[-5.. -1, int]]]]](a: @[])
+  # BUG: that's where the nesting gets too much
+  C* = GenObj[seq[array[Enum1.one..Enum1.two, seq[array[(-5*10).. -1,
+  seq[seq[array[test..test, int]]]]]]]](a: @[])
   unknownKindBounded* = range[Enum1.one..Enum1.two](Enum1.one)
+  D* = GenObj[array[(-5*0).. 0, int]](a: [1])
 
 # sets
 var set1*: set[char]
@@ -121,7 +127,12 @@ p2 = nil
 var d* = cast[ptr Person1](alloc0(sizeof(Person1)))
 
 # procs
-type Proc1* = proc(a, b: var int, c: GenObj[seq[array[0..5, int]]]): void
+type Proc1* = proc(a, b: var int, c: GenObj[seq[array[0..5, int]]]): void {.nimcall.}
+type Proc2* = proc(
+  a,
+  b: proc(a, b: proc(a, b: GenObj[seq[array[0..test, int]]]) {.nimcall.}) {.nimcall.},
+  c: GenObj[seq[array[0..5, int]]]
+): void {.nimcall.}
 proc proc1*[T: int|float, S](a, b: T, _: seq[S]): var GenObj[void] {.nimcall.} = 
   return result
 discard proc1(5, 1, @["hi"])
@@ -166,3 +177,24 @@ const roundPi = 3.1415
 proc `0`(`a`: string) = discard
 `0`"hi"
 
+# try except
+
+try:
+  discard
+except module_tests.ExternalRefGenObj[seq[seq[int]]] as e:
+  discard
+
+const xxx = [1,2,3]
+const `yyy` = [2,3]
+let arr4 = [`yyy`[xxx[0]]: 1]
+
+let choice = 3
+case choice:
+of xxx[0]:
+  discard
+of xxx[1]:
+  discard
+of xxx[2]:
+  discard
+else:
+  discard
