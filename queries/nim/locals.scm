@@ -255,6 +255,7 @@
   (for)
   (while)
   (block)
+  (static_statement)
 
   (proc_declaration)
   (func_declaration)
@@ -263,6 +264,10 @@
   (converter_declaration)
   (template_declaration)
   (macro_declaration)
+
+  (proc_expression)
+  (func_expression)
+  (iterator_expression)
 ] @scope
 
 ; ==============================================================================
